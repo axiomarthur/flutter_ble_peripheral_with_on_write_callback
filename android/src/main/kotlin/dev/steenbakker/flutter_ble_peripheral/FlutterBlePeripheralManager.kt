@@ -50,6 +50,59 @@ class FlutterBlePeripheralManager(context: Context) {
 //    private var rxCharacteristic: BluetoothGattCharacteristic? = null
 
     // Permissions for Bluetooth API > 31
+
+    private lateinit var channel: MethodChannel
+
+    override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
+        channel = MethodChannel(flutterPluginBinding.binaryMessenger, "read_written_values")
+    }
+
+    private var bluetoothGattServer: BluetoothGattServer? = null
+
+    private val gattServerCallback: BluetoothGattServerCallback = object : BluetoothGattServerCallback() {
+        override fun onCharacteristicWriteRequest(
+            device: BluetoothDevice?,
+            requestId: Int,
+            characteristic: BluetoothGattCharacteristic?,
+            preparedWrite: Boolean,
+            responseNeeded: Boolean,
+            offset: Int,
+            value: ByteArray?
+        ) {
+            super.onCharacteristicWriteRequest(device, requestId, characteristic, preparedWrite, responseNeeded, offset, value)
+
+            val data = value?.let { String(it, Charset.forName("UTF-8")) }
+            channel.invokeMethod("onDataReceived", data)
+
+            if (responseNeeded) {
+                bluetoothGattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+            }
+        }
+    }
+
+    private fun startServer() {
+        val bluetoothManager = mBluetoothManager
+        bluetoothGattServer = bluetoothManager?.openGattServer(context, gattServerCallback)
+
+        val myService = UUID.fromString("00001805-0000-1000-8000-00805f9b34fb") // Replace with your service UUID
+        val bleChar = BluetoothGattCharacteristic(
+            UUID.fromString("00AA2a2b-0000-1000-8000-00805f9b34fb"), // Replace with your characteristic UUID
+            BluetoothGattCharacteristic.PROPERTY_READ or BluetoothGattCharacteristic.PROPERTY_WRITE,
+            BluetoothGattCharacteristic.PERMISSION_READ or BluetoothGattCharacteristic.PERMISSION_WRITE
+        )
+
+        val service = BluetoothGattService(
+            myService,
+            BluetoothGattService.SERVICE_TYPE_PRIMARY
+        )
+
+        service.addCharacteristic(bleChar)
+
+        val serviceAdded = bluetoothGattServer?.addService(service) ?: false
+        // log is assumed to be a custom function for logging
+        log("bluetyp", "serviceAdded: $serviceAdded")
+    }
+
     @RequiresApi(Build.VERSION_CODES.S)
     private fun hasBluetoothAdvertisePermission(context: Context): Boolean {
         return (context.checkSelfPermission(
@@ -181,6 +234,7 @@ class FlutterBlePeripheralManager(context: Context) {
                 peripheralResponse,
                 mAdvertiseCallback
         )
+        startServer()
 
 //        addService(peripheralData) TODO: Add service to advertise
     }
